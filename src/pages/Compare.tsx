@@ -610,7 +610,7 @@ export default function Compare() {
             </div>
           </div>
         ) : (
-          <p className="mt-8 text-slate-300">Po porovnaní sa tu zobrazia výsledky.</p>
+          <p className="mt-8 text-slate-300">Tu sa zobrazia výsledky.</p>
         )}
       </div>
     </div>
