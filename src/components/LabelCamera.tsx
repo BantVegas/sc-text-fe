@@ -31,7 +31,7 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
         }
 
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
+          video: { facingMode: "environment" },
         });
 
         if (!active) {
@@ -59,7 +59,7 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     };
   }, []);
 
-  // jednoduchá detekcia hrán + bounding box nad downscalovaným obrazom
+  // detekcia obdĺžnika etikety pomocou projekčných histogramov hrán
   useEffect(() => {
     const canvas = processCanvasRef.current;
     const video = videoRef.current;
@@ -92,33 +92,71 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
           const r = data[idx];
           const g = data[idx + 1];
           const b = data[idx + 2];
-          // jednoduchý prepočet na odtieň sivej
           gray[y * W + x] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
         }
       }
 
-      let minX = W;
-      let minY = H;
-      let maxX = -1;
-      let maxY = -1;
-      const EDGE_THR = 40;
+      const colSum = new Uint16Array(W);
+      const rowSum = new Uint16Array(H);
 
-      for (let y = 1; y < H; y++) {
-        for (let x = 1; x < W; x++) {
+      const EDGE_THR = 35;
+      const marginX = Math.round(W * 0.05);
+      const marginY = Math.round(H * 0.05);
+
+      for (let y = marginY + 1; y < H - marginY; y++) {
+        for (let x = marginX + 1; x < W - marginX; x++) {
           const idx = y * W + x;
           const g0 = gray[idx];
           const gx = Math.abs(g0 - gray[idx - 1]);
           const gy = Math.abs(g0 - gray[idx - W]);
           if (gx + gy > EDGE_THR) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
+            colSum[x]++;
+            rowSum[y]++;
           }
         }
       }
 
+      let maxCol = 0;
+      let maxRow = 0;
+      for (let x = 0; x < W; x++) if (colSum[x] > maxCol) maxCol = colSum[x];
+      for (let y = 0; y < H; y++) if (rowSum[y] > maxRow) maxRow = rowSum[y];
+
+      if (maxCol === 0 || maxRow === 0) {
+        setBox(null);
+        setIsGood(false);
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      const colThr = maxCol * 0.4;
+      const rowThr = maxRow * 0.4;
+
+      let minX = W;
+      let maxX = -1;
+      for (let x = marginX; x < W - marginX; x++) {
+        if (colSum[x] > colThr) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+
+      let minY = H;
+      let maxY = -1;
+      for (let y = marginY; y < H - marginY; y++) {
+        if (rowSum[y] > rowThr) {
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+
       if (maxX > minX && maxY > minY) {
+        // malý padding dovnútra
+        const pad = 2;
+        minX = Math.max(marginX, minX - pad);
+        maxX = Math.min(W - marginX, maxX + pad);
+        minY = Math.max(marginY, minY - pad);
+        maxY = Math.min(H - marginY, maxY + pad);
+
         const bw = maxX - minX;
         const bh = maxY - minY;
         const area = bw * bh;
@@ -128,14 +166,14 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
         const targetAR = aspectRatio || 1;
         const ratioDiff = Math.abs(boxRatio - targetAR) / targetAR;
 
-        const okArea = areaRel > 0.1 && areaRel < 0.9;
-        const okRatio = ratioDiff < 0.35; // ± ~35 %
+        const okArea = areaRel > 0.1 && areaRel < 0.8;
+        const okRatio = ratioDiff < 0.25; // ± ~25 %
 
         setBox({
           x: minX / W,
           y: minY / H,
           w: bw / W,
-          h: bh / H
+          h: bh / H,
         });
         setIsGood(okArea && okRatio);
       } else {
@@ -217,7 +255,7 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
               left: `${box.x * 100}%`,
               top: `${box.y * 100}%`,
               width: `${box.w * 100}%`,
-              height: `${box.h * 100}%`
+              height: `${box.h * 100}%`,
             }}
           />
         )}
