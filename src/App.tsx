@@ -10,45 +10,40 @@ import {
 import Login from "./pages/Login";
 import Compare from "./pages/Compare";
 
-// chránená routa: pustí ďalej len keď je etis_auth === "1"
+// Strážca routy – ak nie si prihlásený, presmeruje na /login a uloží "from" pre návrat
 function RequireAuth() {
   const location = useLocation();
   const ok = typeof window !== "undefined" && localStorage.getItem("etis_auth") === "1";
 
-  if (!ok) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ from: location }}
-      />
-    );
-  }
-
-  return <Outlet />;
+  return ok ? (
+    <Outlet />
+  ) : (
+    <Navigate to="/login" replace state={{ from: location }} />
+  );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* ROOT – vždy na login */}
+        {/* root → login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* verejný login */}
+        {/* login je verejný */}
         <Route path="/login" element={<Login />} />
 
-        {/* chránené routy */}
+        {/* chránená sekcia */}
         <Route element={<RequireAuth />}>
           <Route path="/compare" element={<Compare />} />
         </Route>
 
-        {/* fallback – pri zlej URL tiež na login */}
+        {/* fallback – hocijaká zlá URL → login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   );
 }
+
 
 
 
