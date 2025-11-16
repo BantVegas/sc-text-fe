@@ -1,3 +1,4 @@
+// src/App.tsx
 import {
   BrowserRouter,
   Routes,
@@ -9,38 +10,45 @@ import {
 import Login from "./pages/Login";
 import Compare from "./pages/Compare";
 
-// Strážca routy – ak nie si prihlásený, presmeruje na /login
+// chránená routa: pustí ďalej len keď je etis_auth === "1"
 function RequireAuth() {
   const location = useLocation();
-  const ok = localStorage.getItem("etis_auth") === "1";
+  const ok = typeof window !== "undefined" && localStorage.getItem("etis_auth") === "1";
 
-  return ok ? (
-    <Outlet />
-  ) : (
-    <Navigate to="/login" replace state={{ from: location }} />
-  );
+  if (!ok) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location }}
+      />
+    );
+  }
+
+  return <Outlet />;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Root doména -> login */}
+        {/* ROOT – vždy na login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* Login je verejný */}
+        {/* verejný login */}
         <Route path="/login" element={<Login />} />
 
-        {/* Chránené routy */}
+        {/* chránené routy */}
         <Route element={<RequireAuth />}>
           <Route path="/compare" element={<Compare />} />
         </Route>
 
-        {/* Fallback – všetko ostatné pošli na login */}
+        {/* fallback – pri zlej URL tiež na login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   );
 }
+
 
 
