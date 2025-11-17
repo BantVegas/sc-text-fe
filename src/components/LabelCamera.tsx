@@ -21,8 +21,15 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
   const [isFrozen, setIsFrozen] = useState(false);
   const [lastPreviewUrl, setLastPreviewUrl] = useState<string | null>(null);
 
-  // len indikácia „ready“ (ostrosť / stabilita v rámiku)
+  // analýza – či je záber „ready“
   const [frameReady, setFrameReady] = useState(false);
+  const [pendingAutoShot, setPendingAutoShot] = useState(false);
+
+  // interný stav pre stabilitu (počítadlá medzi framami)
+  const stableRef = useRef<{ frameCount: number; stableFrames: number }>({
+    frameCount: 0,
+    stableFrames: 0,
+  });
 
   const shotRecently = lastShotAt !== null && Date.now() - lastShotAt < 2500; // 2.5 s „odfotené“
 
@@ -40,7 +47,7 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
 
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
-          audio: false
+          audio: false,
         });
 
         if (!active) {
@@ -107,7 +114,13 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     return variance;
   }
 
-  /** Live analýza – len farba rámika, žiadne auto-fotenie */
+  /**
+   * Live analýza – sledujeme ostrosť vo vnútri rámika.
+   * Podmienka „READY“:
+   *  - ostrosť > FOCUS_THRESHOLD
+   *  - aspoň MIN_STABLE_FRAMES po sebe
+   *  - po MIN_WARMUP_FRAMES (nech to nehádže zelenú hneď po štarte)
+   */
   useEffect(() => {
     if (!hasPermission) return;
 
@@ -120,7 +133,15 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     if (!ctx) return;
 
     const targetAR = aspectRatio > 0 ? aspectRatio : 1;
-    const FOCUS_THRESHOLD = 500; // doladíš podľa reality
+
+    // tieto čísla si vieš doladiť podľa reality
+    const FOCUS_THRESHOLD = 1500;      // čím vyššie, tým prísnejší fokus
+    const MIN_STABLE_FRAMES = 10;      // koľko framov po sebe musí byť OK
+    const MIN_WARMUP_FRAMES = 15;      // koľko framov ignorujeme na začiatku
+
+    stableRef.current.frameCount = 0;
+    stableRef.current.stableFrames = 0;
+    setFrameReady(false);
 
     const loop = () => {
       if (stopped) return;
@@ -145,8 +166,25 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
       const imageData = ctx.getImageData(sx, sy, sw, sh);
       const score = computeFocusScore(imageData.data);
 
-      const ready = score > FOCUS_THRESHOLD;
-      setFrameReady(ready);
+      const state = stableRef.current;
+      state.frameCount += 1;
+
+      if (score > FOCUS_THRESHOLD) {
+        state.stableFrames += 1;
+      } else {
+        state.stableFrames = 0;
+      }
+
+      const stableEnough =
+        state.frameCount > MIN_WARMUP_FRAMES &&
+        state.stableFrames >= MIN_STABLE_FRAMES;
+
+      setFrameReady(stableEnough);
+
+      // keď je READY, priprav auto-snímku
+      if (stableEnough && !isFrozen && !isProcessing) {
+        setPendingAutoShot(true);
+      }
 
       requestAnimationFrame(loop);
     };
@@ -157,6 +195,14 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
       stopped = true;
     };
   }, [aspectRatio, hasPermission, isFrozen, isProcessing]);
+
+  // auto-snimek, keď analýza rozhodne, že sme READY
+  useEffect(() => {
+    if (pendingAutoShot && !isProcessing && !isFrozen) {
+      void handleCapture();
+      setPendingAutoShot(false);
+    }
+  }, [pendingAutoShot, isProcessing, isFrozen]);
 
   const handleCapture = async () => {
     const video = videoRef.current;
@@ -169,7 +215,6 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     setIsProcessing(true);
 
     try {
-      // 1) načítame frame z kamery do väčšieho canvasu
       const CAP_W = 1280;
       const CAP_H = Math.round((vh / vw) * CAP_W);
 
@@ -181,11 +226,9 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
 
       ctx.drawImage(video, 0, 0, CAP_W, CAP_H);
 
-      // 2) centrálne orež podľa pomeru strán etikety
       const targetAR = aspectRatio > 0 ? aspectRatio : 1;
       const { sx, sy, sw, sh } = centralCrop(CAP_W, CAP_H, targetAR);
 
-      // 3) výstupný canvas – normalizovaná veľkosť pre BE
       const outW = 1000;
       const outH = Math.round(outW / targetAR);
       const outCanvas = document.createElement("canvas");
@@ -222,13 +265,16 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     setLastPreviewUrl(null);
     setLastShotAt(null);
     setFrameReady(false);
+    setPendingAutoShot(false);
+    stableRef.current.frameCount = 0;
+    stableRef.current.stableFrames = 0;
   };
 
   const buttonLabel = (() => {
     if (isProcessing) return "Spracovávam…";
     if (isFrozen) return "Znova odfotiť";
     if (shotRecently) return "Odfotené ✓";
-    return "Odfotiť";
+    return "Odfotiť manuálne";
   })();
 
   const buttonOnClick = isFrozen ? handleRetake : handleCapture;
@@ -248,14 +294,14 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
           playsInline
         />
 
-        {/* rámik – tvar podľa aspectRatio, farba podľa ostrosti */}
+        {/* rámik – tvar podľa aspectRatio, farba podľa ostrosti/stability */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
             className={`border-2 ${frameBorderClass} rounded-sm transition-colors duration-150`}
             style={{
               width: "70%",
               maxHeight: "70%",
-              aspectRatio: `${aspectRatio > 0 ? aspectRatio : 1} / 1`
+              aspectRatio: `${aspectRatio > 0 ? aspectRatio : 1} / 1`,
             }}
           />
         </div>
@@ -298,8 +344,9 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
       </div>
 
       <p className="mt-2 text-xs text-slate-400">
-        Polož etiketu na kontrastné pozadie, zarovnaj ju do rámika a stlač „Odfotiť“.
-        Rám sa pri ostrom obraze zmení z červenej na zelenú.
+        Polož etiketu na kontrastné pozadie a zarovnaj ju do rámika.
+        Rám je <span className="text-red-400">červený</span>, kým nie je obraz stabilne ostrý.
+        Keď zmení farbu na <span className="text-emerald-400">zelenú</span>, etiketa sa automaticky odfotí.
       </p>
 
       {shotRecently && (
@@ -310,6 +357,7 @@ export default function LabelCamera({ title, aspectRatio, onCapture }: LabelCame
     </div>
   );
 }
+
 
 
 
