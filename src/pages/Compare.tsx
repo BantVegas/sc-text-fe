@@ -595,35 +595,6 @@ export default function Compare() {
           />
         </div>
 
-        {/* Náhľady fotiek (voliteľné) */}
-        <div className="mt-4 grid md:grid-cols-2 gap-6 print:hidden">
-          {masterUrl && (
-            <div>
-              <div className="text-xs text-slate-400 mb-1">
-                Náhľad master etikety
-              </div>
-              <img
-                src={masterUrl}
-                alt="master"
-                className="rounded-lg border border-slate-700 max-h-64 mx-auto bg-white"
-              />
-            </div>
-          )}
-
-          {etiketaUrl && (
-            <div>
-              <div className="text-xs text-slate-400 mb-1">
-                Náhľad etikety na porovnanie
-              </div>
-              <img
-                src={etiketaUrl}
-                alt="etiketa"
-                className="rounded-lg border border-slate-700 max-h-64 mx-auto bg-white"
-              />
-            </div>
-          )}
-        </div>
-
         {/* Tlačidlo Porovnať */}
         <div className="mt-6 print:hidden">
           <button
@@ -839,6 +810,7 @@ export default function Compare() {
     </div>
   );
 }
+
 
 
 
